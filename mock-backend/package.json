@@ -1,0 +1,20 @@
+{
+  "name": "mock-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node -e \"const http=require('http');const req=http.request({hostname:'localhost',port:3000,path:'/api/seed',method:'POST'},res=>{let d='';res.on('data',c=>d+=c);res.on('end',()=>{console.log(d);process.exit(res.statusCode>=200&&res.statusCode<300?0:1);});});req.on('error',e=>{console.error(e.message);process.exit(1)});req.end();\"",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "mongoose": "^9.2.1"
+  }
+}
