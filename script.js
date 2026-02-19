@@ -12,6 +12,11 @@ let timerInterval;
 let startTime;
 let testSubmitted = false;
 
+// Per-question timer state
+let questionTimers = [];
+let currentQuestionStartTime = null;
+let questionTimerInterval = null;
+
 // DOM Elements
 const startScreen = document.getElementById('start-screen');
 const testScreen = document.getElementById('test-screen');
@@ -43,6 +48,7 @@ function initQuestionState() {
     answers = new Array(totalQuestions).fill(null);
     markedForReview = new Array(totalQuestions).fill(false);
     visited = new Array(totalQuestions).fill(false);
+    questionTimers = new Array(totalQuestions).fill(0);
 }
 
 async function loadQuestions() {
@@ -107,6 +113,10 @@ function loadPreviousSession() {
                 ? data.visited
                 : new Array(totalQuestions).fill(false);
             timeRemaining = typeof data.timeRemaining === 'number' ? data.timeRemaining : 7200;
+            questionTimers = Array.isArray(data.questionTimers) && data.questionTimers.length === totalQuestions
+                ? data.questionTimers
+                : new Array(totalQuestions).fill(0);
+            currentQuestionStartTime = data.currentQuestionStartTime || null;
             startTest(true);
         }
     }
@@ -204,6 +214,9 @@ function renderQuestion() {
     visited[currentQuestion] = true;
     renderPalette();
     lucide.createIcons();
+
+    // Start per-question timer
+    startQuestionTimer();
 }
 
 function selectOption(index) {
@@ -233,6 +246,7 @@ function updateReviewButton() {
 
 function previousQuestion() {
     if (currentQuestion > 0) {
+        pauseCurrentQuestionTimer();
         currentQuestion--;
         renderQuestion();
     }
@@ -240,6 +254,7 @@ function previousQuestion() {
 
 function saveAndNext() {
     if (currentQuestion < totalQuestions - 1) {
+        pauseCurrentQuestionTimer();
         currentQuestion++;
         renderQuestion();
     } else {
@@ -254,6 +269,7 @@ function clearResponse() {
 }
 
 function jumpToQuestion(index) {
+    pauseCurrentQuestionTimer();
     currentQuestion = index;
     renderQuestion();
 }
@@ -315,6 +331,41 @@ function updateTimerDisplay() {
     if (mobileTimer) mobileTimer.textContent = timeStr;
 }
 
+function formatQuestionTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+function startQuestionTimer() {
+    // If already timing this question, don't reset
+    if (currentQuestionStartTime !== null) return;
+    currentQuestionStartTime = Date.now();
+    if (questionTimerInterval) clearInterval(questionTimerInterval);
+    questionTimerInterval = setInterval(updateQuestionTimerDisplay, 1000);
+    updateQuestionTimerDisplay();
+}
+
+function pauseCurrentQuestionTimer() {
+    if (currentQuestionStartTime !== null) {
+        const elapsed = Math.floor((Date.now() - currentQuestionStartTime) / 1000);
+        questionTimers[currentQuestion] = (questionTimers[currentQuestion] || 0) + elapsed;
+        currentQuestionStartTime = null;
+    }
+    if (questionTimerInterval) {
+        clearInterval(questionTimerInterval);
+        questionTimerInterval = null;
+    }
+}
+
+function updateQuestionTimerDisplay() {
+    if (currentQuestionStartTime === null) return;
+    const elapsed = Math.floor((Date.now() - currentQuestionStartTime) / 1000);
+    const total = (questionTimers[currentQuestion] || 0) + elapsed;
+    const display = document.getElementById('question-timer-display');
+    if (display) display.textContent = formatQuestionTime(total);
+}
+
 function saveSession() {
     const sessionData = {
         currentQuestion,
@@ -322,6 +373,8 @@ function saveSession() {
         markedForReview,
         visited,
         timeRemaining,
+        questionTimers,
+        currentQuestionStartTime,
         timestamp: Date.now()
     };
     localStorage.setItem('mockTestSession', JSON.stringify(sessionData));
@@ -346,6 +399,7 @@ function closeSubmitModal() {
 
 function confirmSubmit() {
     clearInterval(timerInterval);
+    pauseCurrentQuestionTimer();
     testSubmitted = true;
     // Calculate final stats before clearing session
     let correct = answers.filter((a, idx) => a === questions[idx].correct).length;
@@ -416,6 +470,21 @@ function showResults() {
         `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
     document.getElementById('result-total-time').textContent = '02:00:00';
     document.getElementById('result-avg-time').textContent = totalQuestions ? Math.round(timeTaken / totalQuestions) + 's' : '0s';
+
+    // Per-question time stats
+    const answeredTimers = questionTimers.filter((t, idx) => answers[idx] !== null);
+    if (answeredTimers.length > 0) {
+        const maxTime = Math.max(...answeredTimers);
+        const minTime = Math.min(...answeredTimers);
+        const avgTime = Math.round(answeredTimers.reduce((a, b) => a + b, 0) / answeredTimers.length);
+        document.getElementById('result-fastest-q').textContent = formatQuestionTime(minTime);
+        document.getElementById('result-slowest-q').textContent = formatQuestionTime(maxTime);
+        document.getElementById('result-avg-q-time').textContent = formatQuestionTime(avgTime);
+    } else {
+        document.getElementById('result-fastest-q').textContent = '--:--';
+        document.getElementById('result-slowest-q').textContent = '--:--';
+        document.getElementById('result-avg-q-time').textContent = '--:--';
+    }
     
     // Subject breakdown
     const breakdownContainer = document.getElementById('subject-breakdown');
@@ -479,7 +548,7 @@ function reviewAnswers() {
         card.innerHTML = `
             <div class="flex items-start justify-between mb-4">
                 <div>
-                    <span class="text-sm text-gray-500 mb-1 block">Question ${idx + 1} • ${q.subject}</span>
+                    <span class="text-sm text-gray-500 mb-1 block">Question ${idx + 1} • ${q.subject} • <span class="text-blue-600">Time: ${formatQuestionTime(questionTimers[idx] || 0)}</span></span>
                     <h4 class="font-medium text-gray-900">${q.question}</h4>
                 </div>
                 ${statusBadge}
